@@ -5,6 +5,67 @@
   <title>Name a Stay</title>
   <meta charset="UTF-8" />
   <style>
+.booking-section {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 20px;
+  box-shadow: var(--shadow-soft);
+}
+
+.date-picker-container {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.date-input {
+  flex: 1;
+}
+
+.date-input label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--color-twilight);
+  font-weight: 500;
+}
+
+.date-field {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #e1e8ed;
+  border-radius: 8px;
+  font-size: 1rem;
+  color: var(--color-twilight);
+}
+
+.booking-status {
+  margin-top: 15px;
+  padding: 10px;
+  border-radius: 8px;
+  display: none;
+}
+
+.booking-status.error {
+  display: block;
+  background: #ffe5e5;
+  color: #d32f2f;
+  border: 1px solid #ffa4a4;
+}
+
+.booking-status.success {
+  display: block;
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
+}
+
+.booking-status.loading {
+  display: block;
+  background: #e3f2fd;
+  color: #1976d2;
+  border: 1px solid #90caf9;
+}
 /* Warm, adventure-inspired color palette */
 :root {
   --color-earth: #7c4c2c;
@@ -384,7 +445,20 @@ body {
         </div>
       </div>
     </div>
-
+<div class="booking-section">
+  <div class="date-picker-container">
+    <div class="date-input">
+      <label for="check-in">Check-in</label>
+      <input type="date" id="check-in" class="date-field">
+    </div>
+    <div class="date-input">
+      <label for="check-out">Check-out</label>
+      <input type="date" id="check-out" class="date-field">
+    </div>
+  </div>
+  <button id="book-now" class="btn">Book Now</button>
+  <div id="booking-status" class="booking-status"></div>
+</div>
     <!-- Logged Logout -->
     <div class="grid btn-logged-out">
       <button id="login" class="btn">Login</button>
@@ -394,7 +468,10 @@ body {
         target="_blank" rel="noopener noreferrer">
         Source code
       </a>
-
+      <a href="https://explorer.helium.fhenix.zone/address/0x5fAFBE94664f7C75bdA05C0e55a928b66d81D330"
+        target="_blank" rel="noopener noreferrer">
+        Blockscout
+      </a>
     </footer>
   </div>
 
@@ -411,20 +488,642 @@ body {
 let web3auth = null;
 let walletServicesPlugin = null;
 
+// Add after existing variable declarations
+const INSURANCE_CONTRACT_ADDRESS = "0x67a72d14867A2F7728a366290BD1228B639A6855"; // Replace with actual deployed address
+const INSURANCE_CONTRACT_ABI = [
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "uint256",
+				"name": "bookingId",
+				"type": "uint256"
+			}
+		],
+		"name": "BookingCancelled",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "uint256",
+				"name": "bookingId",
+				"type": "uint256"
+			},
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "guest",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "checkIn",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "checkOut",
+				"type": "uint256"
+			}
+		],
+		"name": "BookingCreated",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "owner",
+				"type": "address"
+			},
+			{
+				"indexed": true,
+				"internalType": "uint256",
+				"name": "chatId",
+				"type": "uint256"
+			}
+		],
+		"name": "ChatCreated",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "newOracleAddress",
+				"type": "address"
+			}
+		],
+		"name": "OracleAddressUpdated",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "guest",
+				"type": "address"
+			}
+		],
+		"name": "RatingUpdated",
+		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "string",
+				"name": "message",
+				"type": "string"
+			},
+			{
+				"internalType": "uint256",
+				"name": "runId",
+				"type": "uint256"
+			}
+		],
+		"name": "addMessage",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "bookingId",
+				"type": "uint256"
+			}
+		],
+		"name": "cancelBooking",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "checkIn",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "checkOut",
+				"type": "uint256"
+			}
+		],
+		"name": "createBooking",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"components": [
+					{
+						"internalType": "bytes",
+						"name": "data",
+						"type": "bytes"
+					}
+				],
+				"internalType": "struct inEuint8",
+				"name": "cleanliness",
+				"type": "tuple"
+			},
+			{
+				"components": [
+					{
+						"internalType": "bytes",
+						"name": "data",
+						"type": "bytes"
+					}
+				],
+				"internalType": "struct inEuint8",
+				"name": "communication",
+				"type": "tuple"
+			},
+			{
+				"components": [
+					{
+						"internalType": "bytes",
+						"name": "data",
+						"type": "bytes"
+					}
+				],
+				"internalType": "struct inEuint8",
+				"name": "houseRules",
+				"type": "tuple"
+			}
+		],
+		"name": "initializeGuest",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "runId",
+				"type": "uint256"
+			},
+			{
+				"internalType": "string",
+				"name": "response",
+				"type": "string"
+			},
+			{
+				"internalType": "string",
+				"name": "errorMessage",
+				"type": "string"
+			}
+		],
+		"name": "onOracleFunctionResponse",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "runId",
+				"type": "uint256"
+			},
+			{
+				"internalType": "string[]",
+				"name": "documents",
+				"type": "string[]"
+			},
+			{
+				"internalType": "string",
+				"name": "",
+				"type": "string"
+			}
+		],
+		"name": "onOracleKnowledgeBaseQueryResponse",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "runId",
+				"type": "uint256"
+			},
+			{
+				"components": [
+					{
+						"internalType": "string",
+						"name": "id",
+						"type": "string"
+					},
+					{
+						"internalType": "string",
+						"name": "content",
+						"type": "string"
+					},
+					{
+						"internalType": "string",
+						"name": "functionName",
+						"type": "string"
+					},
+					{
+						"internalType": "string",
+						"name": "functionArguments",
+						"type": "string"
+					},
+					{
+						"internalType": "uint64",
+						"name": "created",
+						"type": "uint64"
+					},
+					{
+						"internalType": "string",
+						"name": "model",
+						"type": "string"
+					},
+					{
+						"internalType": "string",
+						"name": "systemFingerprint",
+						"type": "string"
+					},
+					{
+						"internalType": "string",
+						"name": "object",
+						"type": "string"
+					},
+					{
+						"internalType": "uint32",
+						"name": "completionTokens",
+						"type": "uint32"
+					},
+					{
+						"internalType": "uint32",
+						"name": "promptTokens",
+						"type": "uint32"
+					},
+					{
+						"internalType": "uint32",
+						"name": "totalTokens",
+						"type": "uint32"
+					}
+				],
+				"internalType": "struct IOracle.LlmResponse",
+				"name": "response",
+				"type": "tuple"
+			},
+			{
+				"internalType": "string",
+				"name": "errorMessage",
+				"type": "string"
+			}
+		],
+		"name": "onOracleLlmResponse",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "newOracleAddress",
+				"type": "address"
+			}
+		],
+		"name": "setOracleAddress",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "string",
+				"name": "message",
+				"type": "string"
+			}
+		],
+		"name": "startChat",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "guest",
+				"type": "address"
+			},
+			{
+				"components": [
+					{
+						"internalType": "bytes",
+						"name": "data",
+						"type": "bytes"
+					}
+				],
+				"internalType": "struct inEuint8",
+				"name": "newCleanliness",
+				"type": "tuple"
+			},
+			{
+				"components": [
+					{
+						"internalType": "bytes",
+						"name": "data",
+						"type": "bytes"
+					}
+				],
+				"internalType": "struct inEuint8",
+				"name": "newCommunication",
+				"type": "tuple"
+			},
+			{
+				"components": [
+					{
+						"internalType": "bytes",
+						"name": "data",
+						"type": "bytes"
+					}
+				],
+				"internalType": "struct inEuint8",
+				"name": "newHouseRules",
+				"type": "tuple"
+			}
+		],
+		"name": "updateGuestRating",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "initialOracleAddress",
+				"type": "address"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "constructor"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"name": "bookings",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "guest",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "checkIn",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "checkOut",
+				"type": "uint256"
+			},
+			{
+				"internalType": "bool",
+				"name": "isActive",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"name": "chatRuns",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "owner",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "messagesCount",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "guest",
+				"type": "address"
+			}
+		],
+		"name": "checkGuestEligibility",
+		"outputs": [
+			{
+				"internalType": "ebool",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "guest",
+				"type": "address"
+			}
+		],
+		"name": "getGuestRating",
+		"outputs": [
+			{
+				"internalType": "euint8",
+				"name": "cleanliness",
+				"type": "uint256"
+			},
+			{
+				"internalType": "euint8",
+				"name": "communication",
+				"type": "uint256"
+			},
+			{
+				"internalType": "euint8",
+				"name": "houseRules",
+				"type": "uint256"
+			},
+			{
+				"internalType": "euint8",
+				"name": "bookingCount",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "chatId",
+				"type": "uint256"
+			}
+		],
+		"name": "getMessageHistory",
+		"outputs": [
+			{
+				"components": [
+					{
+						"internalType": "string",
+						"name": "role",
+						"type": "string"
+					},
+					{
+						"components": [
+							{
+								"internalType": "string",
+								"name": "contentType",
+								"type": "string"
+							},
+							{
+								"internalType": "string",
+								"name": "value",
+								"type": "string"
+							}
+						],
+						"internalType": "struct IOracle.Content[]",
+						"name": "content",
+						"type": "tuple[]"
+					}
+				],
+				"internalType": "struct IOracle.Message[]",
+				"name": "",
+				"type": "tuple[]"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "knowledgeBase",
+		"outputs": [
+			{
+				"internalType": "string",
+				"name": "",
+				"type": "string"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "minimumRequiredScore",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "oracleAddress",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"name": "toolRunning",
+		"outputs": [
+			{
+				"internalType": "string",
+				"name": "",
+				"type": "string"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	}
+];
 (async function init() {
   $(".btn-logged-in").hide();
   $("#sign-tx").hide();
 
   const clientId = "BNAILIB4zmrCw3yBoVrLD1OH4f7pjjjyFtd7yukDrL9KE0vIsjL5GeK9QOmp3txislAi9qKx3kEBc-v-1V_GPiU"; // get your clientId from https://dashboard.web3auth.io
-
+``
   const chainConfig = {
     chainNamespace: "eip155",
-    chainId: "0x14a34",
-    rpcTarget: "https://sepolia.base.org",
+    chainId: "0x7a31c7",
+    rpcTarget: "https://api.helium.fhenix.zone",
     // Avoid using public rpcTarget in production.
     // Use services like Infura, Quicknode etc
-    displayName: "Base Sepolia Testnet",
-    blockExplorerUrl: "https://base-sepolia.blockscout.com/",
+    displayName: "Fhenix Helium Testnet",
+    blockExplorerUrl: "https://explorer.helium.fhenix.zone/",
     ticker: "ETH",
     tickerName: "Ethereum",
     logo: "https://cryptologos.cc/logos/ethereum-eth-logo.png",
@@ -553,51 +1252,302 @@ function uiConsole(...args) {
   }
 }
 
-    // Modify the agents to reference the listing
-    const agents = {
-      insurance: {
-        name: "Insurance Agent",
-        greeting: "Hi! I can help you find the perfect travel insurance for your Bali stay. With a booking value of $2,450 for 7 nights, I recommend comprehensive coverage. Would you like to see options?"
-      },
-      travelBuddy: {
-        name: "Travel Buddies",
-        greeting: "Hello! I found 3 verified travelers planning trips to Bali next month with similar interests. Would you like to connect with them?"
-      },
-      localGuide: {
-        name: "Local Guide",
-        greeting: "Welcome! I can see you're interested in Sarah's villa in Bali. Would you like personalized recommendations for activities near Nusa Dua? I know some great surf spots and restaurants within walking distance."
+// Insurance agent with simplified chat start
+// Insurance agent with proper response handling
+const InsuranceAgent = {
+  name: "Insurance Agent",
+  greeting: "Hi! I can help you find the perfect travel insurance for your Bali stay. With a booking value of $2,450 for 7 nights, I recommend comprehensive coverage. Would you like to see options?",
+  chatId: null,
+  isInitialized: false,
+  messageHistory: [],
+
+  async initialize() {
+    if (!web3auth?.provider) {
+      throw new Error("Please connect your wallet first");
+    }
+    this.isInitialized = true;
+    return true;
+  },
+
+  async startChatWithMessage(message) {
+    try {
+      if (!this.isInitialized) {
+        await this.initialize();
       }
-    };
 
-    // Keep existing event listener code but add mock data
-    const mockUserData = {
-      previousStays: 15,
-      trustScore: 4.8,
-      previousDestinations: ["Tokyo", "Paris", "New York"],
-      verifiedReviews: [
-        "Perfect guest, left the place spotless",
-        "Great communication, highly recommended",
-        "Respectful and friendly traveler"
-      ]
-    };
+      const web3 = new Web3(web3auth.provider);
+      const contract = new web3.eth.Contract(INSURANCE_CONTRACT_ABI, INSURANCE_CONTRACT_ADDRESS);
+      const accounts = await web3.eth.getAccounts();
+      
+      // Start chat with the message
+      const startChatCall = await contract.methods.startChat(message).call({ from: accounts[0] });
+      this.chatId = Number(startChatCall);
+      
+      // Send the transaction and wait for it to be mined
+      await contract.methods.startChat(message).send({ from: accounts[0] });
+      
+      // Store message in history
+      this.messageHistory.push({
+        role: 'user',
+        content: message
+      });
 
-    // Modify processAgentResponse to use listing context
-    async function processAgentResponse(agent, message, userInfo) {
-      if (message.toLowerCase().includes('price') || message.toLowerCase().includes('cost')) {
-        return {
-          insurance: "For a 7-night stay at $2,450, I recommend our Premium Plan at $175. It covers trip cancellation, medical emergencies, and even surfing accidents - perfect for Bali!",
-          travelBuddy: "The villa costs $350/night, but splitting with 4 travel buddies would bring your share to $87.50/night. I found 3 verified travelers interested in sharing!",
-          localGuide: "The villa is $350/night - great value for Nusa Dua! Nearby activities range from $30 for surf lessons to $120 for private temple tours."
-        }[agent];
+      // Wait a bit for the oracle to respond
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      
+      // Get the newest message which should be the AI response
+      const messages = await contract.methods.getMessageHistory(this.chatId).call({ from: accounts[0] });
+      if (messages && messages.length > 1) { // Check for length > 1 since first message is the user's
+        const aiResponse = messages[messages.length - 1];
+        return aiResponse.content[0].value;
       }
       
-      // Default responses referencing the listing
-      return {
-        insurance: "Based on the beachfront location and activities in Bali, I'd recommend including water sports coverage. Would you like to see our enhanced coverage options?",
-        travelBuddy: "I found a group of 3 verified travelers (trust scores >4.5) interested in sharing the villa next month. They're also interested in surfing and temple visits. Want to connect?",
-        localGuide: "There's an amazing local market just 10 minutes from the villa. I can also recommend some secret beaches nearby that most tourists don't know about. What interests you?"
-      }[agent];
+      return null;
+    } catch (error) {
+      console.error("Failed to start insurance chat:", error);
+      throw error;
     }
+  },
+
+  async sendMessage(message) {
+    try {
+      if (!this.chatId) {
+        // If no chat exists, start one with this message
+        return await this.startChatWithMessage(message);
+      }
+
+      const web3 = new Web3(web3auth.provider);
+      const contract = new web3.eth.Contract(INSURANCE_CONTRACT_ABI, INSURANCE_CONTRACT_ADDRESS);
+      const accounts = await web3.eth.getAccounts();
+
+      // Store user message in history
+      this.messageHistory.push({
+        role: 'user',
+        content: message
+      });
+
+      // Send message and wait for transaction to be mined
+      await contract.methods.addMessage(message, String(this.chatId)).send({ from: accounts[0] });
+      
+      // Wait a bit for the oracle to respond
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Get the newest message which should be the AI response
+      const messages = await contract.methods.getMessageHistory(this.chatId).call({ from: accounts[0] });
+      if (messages && messages.length > 0) {
+        const aiResponse = messages[messages.length - 1];
+        // Store AI response in history
+        this.messageHistory.push({
+          role: 'assistant',
+          content: aiResponse.content[0].value
+        });
+        return aiResponse.content[0].value;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error("Failed to send message:", error);
+      throw error;
+    }
+  },
+
+  async getMessageHistory() {
+    try {
+      const web3 = new Web3(web3auth.provider);
+      const contract = new web3.eth.Contract(INSURANCE_CONTRACT_ABI, INSURANCE_CONTRACT_ADDRESS);
+      const accounts = await web3.eth.getAccounts();
+
+      const messages = await contract.methods.getMessageHistory(this.chatId).call({ from: accounts[0] });
+      return messages;
+    } catch (error) {
+      console.error("Failed to get message history:", error);
+      throw error;
+    }
+  }
+};
+
+// Click handler - no changes needed
+$("#insuranceAgent").click(async function() {
+  try {
+    const chatWindow = document.querySelector("#chatWindow");
+    chatWindow.innerHTML = '';
+    
+    await InsuranceAgent.initialize();
+    
+    const messageInput = document.querySelector("#messageInput");
+    messageInput.value = InsuranceAgent.greeting;
+    messageInput.disabled = false;
+    document.querySelector("#sendMessage").disabled = false;
+  } catch (error) {
+    console.error("Failed to initialize insurance agent:", error);
+    document.querySelector("#chatWindow").innerHTML += `
+      <div class="message ai-message error">
+        Failed to initialize chat. Please ensure your wallet is connected and try again.
+      </div>
+    `;
+  }
+});
+
+// Send message handler - now with loading state
+$("#sendMessage").click(async function() {
+  const messageInput = document.querySelector("#messageInput");
+  const message = messageInput.value.trim();
+  if (!message) return;
+  
+  const chatWindow = document.querySelector("#chatWindow");
+  const sendButton = this;
+  
+  try {
+    // Disable input and show loading state
+    messageInput.disabled = true;
+    sendButton.disabled = true;
+    sendButton.textContent = "Sending...";
+    
+    // Display user message
+    chatWindow.innerHTML += `
+      <div class="message user-message">
+        ${message}
+      </div>
+    `;
+    
+    // Add loading indicator
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'message ai-message loading';
+    loadingDiv.textContent = 'Thinking...';
+    chatWindow.appendChild(loadingDiv);
+    
+    // Send message and wait for AI response
+    const response = await InsuranceAgent.sendMessage(message);
+    
+    // Remove loading indicator
+    loadingDiv.remove();
+    
+    // Display AI response
+    if (response) {
+      chatWindow.innerHTML += `
+        <div class="message ai-message">
+          ${response}
+        </div>
+      `;
+    }
+    
+    // Clear input
+    messageInput.value = "";
+  } catch (error) {
+    console.error("Failed to send message:", error);
+    chatWindow.innerHTML += `
+      <div class="message ai-message error">
+        Sorry, there was an error processing your message. Please try again.
+      </div>
+    `;
+  } finally {
+    // Reset UI state
+    messageInput.disabled = false;
+    sendButton.disabled = false;
+    sendButton.textContent = "Send";
+    messageInput.focus();
+  }
+});
+
+// Add loading state styles
+const style = document.createElement('style');
+style.textContent = `
+  .message.ai-message.loading {
+    background: var(--gradient-ocean);
+    opacity: 0.7;
+  }
+  
+  .message.ai-message.error {
+    background: var(--gradient-sunset);
+    border-left: 4px solid #ff4444;
+  }
+`;
+document.head.appendChild(style);
+const BookingSystem = {
+  contract: null,
+  
+  async initialize() {
+    if (!web3auth?.provider) {
+      throw new Error("Please connect your wallet first");
+    }
+    
+    const web3 = new Web3(web3auth.provider);
+    this.contract = new web3.eth.Contract(INSURANCE_CONTRACT_ABI, INSURANCE_CONTRACT_ADDRESS);
+    
+    // Add event listeners
+    document.getElementById('book-now').addEventListener('click', () => this.handleBooking());
+    
+    // Set minimum date as today for check-in
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('check-in').min = today;
+    
+    // Update check-out minimum date when check-in is selected
+    document.getElementById('check-in').addEventListener('change', (e) => {
+      document.getElementById('check-out').min = e.target.value;
+    });
+  },
+  
+  showStatus(message, type) {
+    const statusDiv = document.getElementById('booking-status');
+    statusDiv.textContent = message;
+    statusDiv.className = `booking-status ${type}`;
+  },
+  
+  async handleBooking() {
+    try {
+      const checkIn = document.getElementById('check-in').value;
+      const checkOut = document.getElementById('check-out').value;
+      
+      if (!checkIn || !checkOut) {
+        this.showStatus('Please select both check-in and check-out dates', 'error');
+        return;
+      }
+      
+      // Convert dates to UNIX timestamps
+      const checkInTimestamp = Math.floor(new Date(checkIn).getTime() / 1000);
+      const checkOutTimestamp = Math.floor(new Date(checkOut).getTime() / 1000);
+      
+      this.showStatus('Creating booking...', 'loading');
+      
+      const web3 = new Web3(web3auth.provider);
+      const accounts = await web3.eth.getAccounts();
+      
+      // Call the smart contract's createBooking function
+      const result = await this.contract.methods.createBooking(
+        checkInTimestamp,
+        checkOutTimestamp
+      ).send({ from: accounts[0] });
+      
+      if (result.status) {
+        this.showStatus('Booking confirmed! Transaction hash: ' + result.transactionHash, 'success');
+        // You might want to disable the booking form or reset it here
+      } else {
+        this.showStatus('Transaction failed', 'error');
+      }
+    } catch (error) {
+      console.error('Booking error:', error);
+      this.showStatus(
+        error.message.includes('Guest does not meet minimum rating') 
+          ? 'Sorry, you do not meet the minimum rating requirements for booking'
+          : 'Failed to create booking: ' + error.message,
+        'error'
+      );
+    }
+  }
+};
+
+// Initialize booking system when wallet is connected
+$("#login").click(async function(event) {
+  try {
+    await web3auth.connect();
+    $(".btn-logged-out").hide();
+    $(".btn-logged-in").show();
+    await BookingSystem.initialize();
+    uiConsole("Logged in Successfully!");
+  } catch (error) {
+    console.error(error.message);
+  }
+});
   </script>
 </body>
 
