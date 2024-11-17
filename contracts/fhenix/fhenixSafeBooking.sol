@@ -276,8 +276,41 @@ contract fheBooking {
         uint256 checkIn;
         uint256 checkOut;
         bool isActive;
+        uint256 securityDeposit;
     }
-
+    // Security deposit constants
+    uint256 public constant BASE_DEPOSIT = 0.5 ether;    // Base deposit amount
+    uint256 public constant MIN_DEPOSIT = 0.1 ether;     // Minimum deposit for highest rated guests
+    uint256 public constant MAX_DEPOSIT = 1 ether;       // Maximum deposit for new/low rated guests
+    // Calculate required security deposit based on guest rating
+    function calculateSecurityDeposit(address guest) public view returns (uint256) {
+        GuestRating storage rating = guestRatings[guest];
+        
+        // For new guests with no ratings, require maximum deposit
+        if (FHE.decrypt(rating.bookingCount) == 0) {
+            return MAX_DEPOSIT;
+        }
+        
+        // Calculate average score
+        euint8 totalScore = rating.cleanliness + rating.communication + rating.houseRules;
+        euint8 averageScore = totalScore / FHE.asEuint8(3);
+        uint8 decryptedScore = FHE.decrypt(averageScore);
+        
+        // Calculate deposit reduction based on score
+        // Score of 50 = minimum deposit
+        // Score of 30 (minimum required) = base deposit
+        // Score below 30 = maximum deposit
+        if (decryptedScore >= 45) {
+            return MIN_DEPOSIT;
+        } else if (decryptedScore >= 30) {
+            // Linear interpolation between base and minimum deposit
+            uint256 scoreAboveMin = decryptedScore - 30;
+            uint256 reduction = (BASE_DEPOSIT - MIN_DEPOSIT) * scoreAboveMin / 15;
+            return BASE_DEPOSIT - reduction;
+        } else {
+            return MAX_DEPOSIT;
+        }
+    }
     // State variables
     mapping(address => GuestRating) private guestRatings;
     mapping(uint256 => Booking) public bookings;
@@ -312,16 +345,18 @@ contract fheBooking {
         return averageScore.gte(FHE.asEuint8(minimumRequiredScore));
     }
 
-    // Create a new booking
-    function createBooking(uint256 checkIn, uint256 checkOut) public returns (uint256) {
+    // Modified createBooking function to handle security deposit
+    function createBooking(uint256 checkIn, uint256 checkOut) public payable returns (uint256) {
         require(checkIn < checkOut, "Invalid booking dates");
         require(checkIn > block.timestamp, "Cannot book in the past");
         
         // Check if guest meets minimum rating requirements
         ebool isEligible = checkGuestEligibility(msg.sender);
-        
-        // We need to decrypt this check since it determines if the booking can proceed
         require(FHE.decrypt(isEligible), "Guest does not meet minimum rating requirements");
+
+        // Calculate required security deposit
+        uint256 requiredDeposit = calculateSecurityDeposit(msg.sender);
+        require(msg.value >= requiredDeposit, "Insufficient security deposit");
 
         // Create the booking
         uint256 bookingId = nextBookingId++;
@@ -329,16 +364,52 @@ contract fheBooking {
             guest: msg.sender,
             checkIn: checkIn,
             checkOut: checkOut,
-            isActive: true
+            isActive: true,
+            securityDeposit: msg.value
         });
 
         // Increment booking count for guest
         GuestRating storage rating = guestRatings[msg.sender];
         rating.bookingCount = rating.bookingCount + FHE.asEuint8(1);
 
-        emit BookingCreated(bookingId, msg.sender, checkIn, checkOut);
         return bookingId;
     }
+
+    // Modified cancelBooking function to handle deposit refund
+    function cancelBooking(uint256 bookingId) public {
+        Booking storage booking = bookings[bookingId];
+        require(booking.isActive, "Booking is not active");
+        require(msg.sender == booking.guest, "Only guest can cancel booking");
+        require(booking.checkIn > block.timestamp, "Cannot cancel past bookings");
+        
+        uint256 depositToReturn = booking.securityDeposit;
+        booking.securityDeposit = 0;
+        booking.isActive = false;
+        
+        // Return the security deposit to the guest
+        (bool success, ) = booking.guest.call{value: depositToReturn}("");
+        require(success, "Failed to return security deposit");
+        
+        emit BookingCancelled(bookingId);
+    }
+
+    // Function to return security deposit after successful stay
+    function returnDeposit(uint256 bookingId) public {
+        Booking storage booking = bookings[bookingId];
+        require(booking.isActive, "Booking is not active");
+        require(block.timestamp > booking.checkOut, "Booking hasn't ended yet");
+        require(msg.sender == owner, "Only owner can return deposit");
+        
+        uint256 depositToReturn = booking.securityDeposit;
+        booking.securityDeposit = 0;
+        booking.isActive = false;
+        
+        // Return the security deposit to the guest
+        (bool success, ) = booking.guest.call{value: depositToReturn}("");
+        require(success, "Failed to return security deposit");
+        
+    }
+
 
     // Update guest ratings (only callable by authorized raters)
     function updateGuestRating(
@@ -374,16 +445,6 @@ contract fheBooking {
         emit RatingUpdated(guest);
     }
 
-    // Cancel a booking
-    function cancelBooking(uint256 bookingId) public {
-        Booking storage booking = bookings[bookingId];
-        require(booking.isActive, "Booking is not active");
-        require(msg.sender == booking.guest, "Only guest can cancel booking");
-        require(booking.checkIn > block.timestamp, "Cannot cancel past bookings");
-        
-        booking.isActive = false;
-        emit BookingCancelled(bookingId);
-    }
 
     // Get encrypted rating summary (only the guest can decrypt these values)
     function getGuestRating(address guest) public view returns (
@@ -401,4 +462,3 @@ contract fheBooking {
         );
     }
 }
-
